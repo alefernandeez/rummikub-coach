@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Rummikub Coach</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Rummikub">
+<link rel="apple-touch-icon" href="icon.png">
+<style>
+  :root { --bg:#0f3d2e; --felt:#14513d; --tile:#f6efd9; --tile-edge:#d8cba4; --ink:#f3f3ee; --muted:#a9c4b6; --accent:#ffd34d; --bad:#ff6b6b; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { margin:0; font-family:-apple-system, system-ui, "Segoe UI", sans-serif; background:var(--bg); color:var(--ink);
+         padding: env(safe-area-inset-top) env(safe-area-inset-right) calc(env(safe-area-inset-bottom) + 16px) env(safe-area-inset-left); }
+  header { padding:14px 16px 4px; display:flex; align-items:center; justify-content:space-between; max-width:640px; margin:0 auto; }
+  h1 { font-size:20px; margin:0; }
+  .ver { color:var(--muted); font-size:12px; margin-left:8px; }
+  main { padding:0 12px; max-width:640px; margin:0 auto; }
+  .card { background:var(--felt); border-radius:14px; padding:12px; margin:10px 0; box-shadow:0 2px 8px rgba(0,0,0,.25); }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .between { justify-content:space-between; }
+  .seg { display:flex; background:rgba(0,0,0,.25); border-radius:10px; padding:3px; }
+  .seg button { flex:1; border:0; background:transparent; color:var(--muted); padding:9px 6px; border-radius:8px; font-size:15px; font-weight:600; }
+  .seg button.on { background:var(--ink); color:#123; }
+  .title { font-weight:700; margin:2px 2px 8px; display:flex; justify-content:space-between; align-items:center; }
+  .title small { color:var(--muted); font-weight:400; }
+  .tiles { display:flex; flex-wrap:wrap; gap:5px; min-height:44px; align-items:center; }
+  .tile { width:32px; height:44px; background:var(--tile); border:1px solid var(--tile-edge); border-radius:6px;
+          display:flex; align-items:center; justify-content:center; font-weight:800; font-size:19px;
+          box-shadow:0 2px 0 var(--tile-edge); user-select:none; position:relative; cursor:pointer; }
+  .tile.j { font-size:20px; color:#c0392b; }
+  .tile.new { outline:3px solid var(--accent); outline-offset:1px; }
+  .tile.unsure { outline:2px dashed #ff9f1c; outline-offset:1px; }
+  .tile .sub { position:absolute; bottom:1px; right:3px; font-size:9px; font-weight:800; }
+  .empty { color:var(--muted); font-size:14px; padding:10px 4px; }
+  .setbox { border:2px solid transparent; border-radius:10px; padding:5px; margin:4px 0; background:rgba(0,0,0,.12); display:flex; gap:6px; align-items:center; }
+  .setbox.cur { border-color:var(--ink); }
+  .setbox.bad { border-color:var(--bad); }
+  .setbox .tiles { flex:1; min-height:44px; }
+  .setbox .x { background:none; border:0; color:var(--muted); font-size:20px; padding:4px 8px; }
+  .colors { display:grid; grid-template-columns:repeat(4,1fr); gap:6px; margin-bottom:8px; }
+  .colors button { height:40px; border-radius:10px; border:2px solid transparent; font-weight:700; color:#fff; font-size:13px; }
+  .colors button.on { border-color:#fff; box-shadow:0 0 0 2px var(--accent); }
+  .nums { display:grid; grid-template-columns:repeat(7,1fr); gap:6px; }
+  .nums button { height:44px; border-radius:8px; border:1px solid var(--tile-edge); background:var(--tile); font-size:18px; font-weight:800; }
+  .btn { border:0; border-radius:12px; padding:12px 14px; font-size:16px; font-weight:700; cursor:pointer; }
+  .btn.primary { background:var(--accent); color:#1b1b1b; width:100%; font-size:18px; padding:15px; }
+  .btn.ghost { background:rgba(255,255,255,.12); color:var(--ink); }
+  .btn.small { padding:8px 10px; font-size:14px; }
+  .btn.cam { background:#2d7dd2; color:#fff; flex:1; }
+  .btn:disabled { opacity:.5; }
+  label.switch { display:flex; align-items:center; gap:10px; font-size:15px; }
+  label.switch input { width:22px; height:22px; }
+  .result h2 { margin:4px 0 6px; font-size:19px; }
+  .set { display:flex; align-items:center; gap:6px; padding:6px 0; border-top:1px solid rgba(255,255,255,.08); }
+  .set .tag { font-size:11px; color:var(--accent); width:64px; flex-shrink:0; }
+  .note { color:var(--muted); font-size:13px; line-height:1.4; margin:4px 2px; }
+  .warn { color:#ffd0d0; }
+  .hidden { display:none !important; }
+  .toast { position:fixed; left:50%; bottom:calc(env(safe-area-inset-bottom) + 20px); transform:translateX(-50%); z-index:20;
+           background:#000d; color:#fff; padding:10px 16px; border-radius:20px; font-size:14px; opacity:0; transition:opacity .2s; pointer-events:none; max-width:90%; text-align:center; }
+  .toast.show { opacity:1; }
+  .sheet-bg { position:fixed; inset:0; background:#0008; z-index:10; display:flex; align-items:flex-end; justify-content:center; }
+  .sheet { background:#174a39; width:100%; max-width:640px; border-radius:16px 16px 0 0; padding:14px 14px calc(env(safe-area-inset-bottom) + 14px); }
+  .spinner { display:inline-block; width:16px; height:16px; border:2px solid #fff6; border-top-color:#fff; border-radius:50%; animation:sp 1s linear infinite; vertical-align:-3px; margin-right:6px; }
+  @keyframes sp { to { transform:rotate(360deg); } }
+  select { background:var(--tile); border-radius:8px; padding:6px; font-size:15px; }
+  .camwrap { position:relative; width:100%; aspect-ratio:3/4; background:#000; border-radius:12px; overflow:hidden; }
+  .camwrap video, .camwrap canvas { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
+  .camwrap canvas { object-fit:contain; }
+  .camstatus { position:absolute; left:8px; bottom:8px; background:#000a; color:#fff; font-size:13px; padding:5px 9px; border-radius:12px; }
+</style>
+</head>
+<body>
+<header><div><h1 style="display:inline">Rummikub Coach</h1><span class="ver">v0.3 · offline</span></div>
+  <button class="btn ghost small" id="settingsBtn">⚙︎ Juego</button></header>
+<main>
+  <div class="card">
+    <div class="camwrap" id="camWrap">
+      <video id="video" playsinline muted autoplay></video>
+      <canvas id="still" class="hidden"></canvas>
+      <div class="camstatus" id="camStatus">Cámara apagada</div>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <button class="btn cam" id="scanRack" disabled>📷 Escanear atril</button>
+      <button class="btn cam" id="scanTable" disabled>📷 Escanear mesa</button>
+    </div>
+    <div class="row between" style="margin-top:8px">
+      <button class="btn ghost small" id="camToggle">Activar cámara</button>
+      <span class="row" style="gap:6px"><label class="btn ghost small" style="cursor:pointer">🖼 Desde foto<input type="file" accept="image/*" id="photoIn" class="hidden"></label>
+      <select id="photoWhat" aria-label="La foto es de"><option value="table">Mesa</option><option value="rack">Atril</option></select></span>
+    </div>
+    <p class="note">Apunta al atril o a la mesa y pulsa escanear: la app coge el fotograma más nítido. Revisa lo leído (borde naranja discontinuo = dudosa) y toca cualquier ficha para corregirla.</p>
+  </div>
+
+  <div class="card">
+    <div class="seg" id="zoneSeg"><button data-z="hand" class="on">Mi atril</button><button data-z="table">Mesa</button></div>
+    <div style="height:10px"></div>
+    <div id="handZone">
+      <div class="title"><span>Mi atril</span><small id="handCount"></small></div>
+      <div class="tiles" id="handTiles"></div>
+    </div>
+    <div id="tableZone" class="hidden">
+      <div class="title"><span>Mesa</span><small id="tableCount"></small></div>
+      <div id="setList"></div>
+      <button class="btn ghost small" id="newSet" style="margin-top:6px">+ Nuevo set</button>
+      <p class="note">Toca un set para seleccionarlo; las fichas del teclado se añaden ahí. Rojo = set inválido.</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="colors" id="colors"></div>
+    <div class="nums" id="nums"></div>
+    <div class="row between" style="margin-top:10px">
+      <button class="btn ghost small" id="undo">↶ Deshacer</button>
+      <button class="btn ghost small" id="clearZone">Vaciar zona</button>
+    </div>
+  </div>
+
+  <div class="card"><label class="switch"><input type="checkbox" id="melded"> Ya he hecho mi primera bajada (30 pts)</label></div>
+
+  <button class="btn primary" id="solveBtn">Calcular mejor jugada</button>
+  <div class="card result hidden" id="result"></div>
+  <div class="row" style="justify-content:center; margin:16px 0"><button class="btn ghost small" id="newGame">Nueva partida</button></div>
+</main>
+
+<div class="sheet-bg hidden" id="sheetBg"><div class="sheet" id="sheet"></div></div>
+<div class="toast" id="toast"></div>
+
+<script src="vendor/ort.wasm.min.js"></script>
+<script src="solver.js"></script>
+<script src="vision.js"></script>
+<script>
+(function(){
+  const S = window.RummiSolver;
+  const EDITIONS = {
+    seis: { label:'Mi juego (6 colores)', names:['Negro','Rojo','Azul','Naranja','Amarillo','Verde'], en:['black','red','blue','orange','yellow','green'],
+            css:['#1d1d1d','#d0312d','#1f5fbf','#e8730c','#e0b100','#1e9e4a'] },
+    clasico: { label:'Clásico (4 colores)', names:['Negro','Rojo','Azul','Naranja'], en:['black','red','blue','orange'],
+            css:['#1d1d1d','#d0312d','#1f5fbf','#e88a00'] }
+  };
+  const $ = id => document.getElementById(id);
+  const clone = o => JSON.parse(JSON.stringify(o));
+  function load(){ try { return JSON.parse(localStorage.getItem('rummi-v2')); } catch(e){ return null; } }
+  function save(){ try { localStorage.setItem('rummi-v2', JSON.stringify(state)); } catch(e){} }
+  const fresh = (cfg) => ({ hand:[], sets:[], cur:-1, melded:false, cfg: cfg || { edition:'seis', copies:2, jokers:2 } });
+  let state = load() || fresh();
+  let zone = 'hand', color = 0, history = [], lastResult = null;
+  const ed = () => EDITIONS[state.cfg.edition];
+  const C = () => ed().names.length;
+  const solverCfg = () => ({ colors: C(), copies: state.cfg.copies });
+  const push = () => { history.push(JSON.stringify(state)); if (history.length > 60) history.shift(); };
+  function toast(msg, ms){ const t=$('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove('show'), ms||1800); }
+  const keyOf = t => t.joker ? 'J' : t.c+'-'+t.n;
+  const allTiles = () => state.hand.concat(state.sets.flat());
+  const countOf = t => allTiles().filter(x => keyOf(x)===keyOf(t)).length;
+
+  function tileEl(t, opts={}){
+    const d = document.createElement('div');
+    d.className = 'tile' + (t.joker ? ' j' : '') + (opts.isNew ? ' new' : '') + (t.unsure ? ' unsure' : '');
+    if (t.joker) {
+      d.textContent = '☺';
+      if (opts.rep && t.n) { const s=document.createElement('span'); s.className='sub'; s.style.color=ed().css[t.c]||'#333'; s.textContent=t.n; d.appendChild(s); }
+    } else { d.textContent = t.n; d.style.color = ed().css[t.c] || '#888'; }
+    return d;
+  }
+  const sortHand = arr => arr.map((t,i)=>({t,i})).sort((a,b)=> (a.t.joker?99:a.t.c)-(b.t.joker?99:b.t.c) || (a.t.n||0)-(b.t.n||0));
+  const orderSetTiles = s => {
+    const real = s.filter(t=>!t.joker);
+    if (real.length && real.every(t=>t.n===real[0].n)) return s.map((t,i)=>({t,i})).sort((a,b)=>(a.t.joker?99:a.t.c)-(b.t.joker?99:b.t.c));
+    return s.map((t,i)=>({t,i}));
+  };
+
+  function render(){
+    // atril
+    const hb = $('handTiles'); hb.innerHTML='';
+    $('handCount').textContent = state.hand.length + ' fichas';
+    if (!state.hand.length) hb.innerHTML = '<div class="empty">Haz una foto o añade tus fichas con el teclado.</div>';
+    sortHand(state.hand).forEach(({t,i}) => { const el=tileEl(t); el.onclick=()=>editTile('hand', i); hb.appendChild(el); });
+    // mesa
+    const sl = $('setList'); sl.innerHTML='';
+    $('tableCount').textContent = state.sets.length + ' sets · ' + state.sets.flat().length + ' fichas';
+    if (!state.sets.length) sl.innerHTML = '<div class="empty">Mesa vacía. Haz una foto o pulsa "+ Nuevo set".</div>';
+    state.sets.forEach((s, si) => {
+      const box = document.createElement('div');
+      const ok = S.validSet(s, C());
+      box.className = 'setbox' + (si===state.cur ? ' cur' : '') + (ok ? '' : ' bad');
+      box.onclick = () => { state.cur = si; save(); render(); };
+      const tl = document.createElement('div'); tl.className='tiles';
+      orderSetTiles(s).forEach(({t,i}) => { const el=tileEl(t,{rep:true}); el.onclick=(e)=>{ e.stopPropagation(); editTile('set', i, si); }; tl.appendChild(el); });
+      const x = document.createElement('button'); x.className='x'; x.textContent='✕'; x.setAttribute('aria-label','Borrar set');
+      x.onclick = (e)=>{ e.stopPropagation(); push(); state.sets.splice(si,1); if (state.cur>=state.sets.length) state.cur=state.sets.length-1; save(); render(); };
+      box.appendChild(tl); box.appendChild(x); sl.appendChild(box);
+    });
+    $('handZone').classList.toggle('hidden', zone!=='hand');
+    $('tableZone').classList.toggle('hidden', zone!=='table');
+    document.querySelectorAll('#zoneSeg button').forEach(b=>b.classList.toggle('on', b.dataset.z===zone));
+    $('melded').checked = state.melded;
+    renderKeys();
+  }
+
+  // ---------- teclado ----------
+  function renderKeys(){
+    const colBox = $('colors'); colBox.innerHTML='';
+    ed().names.forEach((n,i)=>{ const b=document.createElement('button'); b.textContent=n; b.style.background=ed().css[i]; b.className = i===color?'on':''; b.onclick=()=>{color=i; renderKeys();}; colBox.appendChild(b); });
+    const jb=document.createElement('button'); jb.textContent='☺ Comodín'; jb.style.background='#6b4e9b'; jb.onclick=()=>add({joker:true}); colBox.appendChild(jb);
+    const numBox = $('nums'); numBox.innerHTML='';
+    for (let n=1;n<=13;n++){ const b=document.createElement('button'); b.textContent=n; b.style.color=ed().css[color]; b.onclick=()=>add({c:color,n}); numBox.appendChild(b); }
+  }
+  function add(t){
+    const max = t.joker ? state.cfg.jokers : state.cfg.copies;
+    if (countOf(t) >= max) { toast(t.joker ? `Solo hay ${max} comodines` : `Ya hay ${max} fichas iguales`); return; }
+    push();
+    if (zone === 'hand') state.hand.push(t);
+    else { if (state.cur < 0 || state.cur >= state.sets.length) { state.sets.push([]); state.cur = state.sets.length-1; } state.sets[state.cur].push(t); }
+    save(); render();
+  }
+
+  // ---------- editor de ficha ----------
+  function editTile(where, i, si){
+    const arr = where==='hand' ? state.hand : state.sets[si];
+    const t = arr[i];
+    let selC = t.joker ? 0 : t.c;
+    const sheet = $('sheet');
+    const draw = () => {
+      sheet.innerHTML = `<div class="title"><span>Corregir ficha</span><small>${where==='hand'?'atril':'mesa'}</small></div>`;
+      const cb = document.createElement('div'); cb.className='colors';
+      ed().names.forEach((n,ci)=>{ const b=document.createElement('button'); b.textContent=n; b.style.background=ed().css[ci]; b.className=ci===selC?'on':''; b.onclick=()=>{selC=ci; draw();}; cb.appendChild(b); });
+      const jb=document.createElement('button'); jb.textContent='☺ Comodín'; jb.style.background='#6b4e9b'; jb.onclick=()=>set({joker:true}); cb.appendChild(jb);
+      sheet.appendChild(cb);
+      const nb = document.createElement('div'); nb.className='nums';
+      for (let n=1;n<=13;n++){ const b=document.createElement('button'); b.textContent=n; b.style.color=ed().css[selC]; if(!t.joker && t.n===n && t.c===selC) b.style.outline='3px solid #ffd34d'; b.onclick=()=>set({c:selC,n}); nb.appendChild(b); }
+      sheet.appendChild(nb);
+      const row = document.createElement('div'); row.className='row between'; row.style.marginTop='12px';
+      const del = document.createElement('button'); del.className='btn ghost small'; del.textContent='🗑 Quitar ficha'; del.onclick=()=>{ push(); arr.splice(i,1); if (where==='set' && !arr.length) { state.sets.splice(si,1); state.cur=-1; } close(); };
+      const ok = document.createElement('button'); ok.className='btn ghost small'; ok.textContent= t.unsure ? '✓ Es correcta' : 'Cerrar'; ok.onclick=()=>{ if (t.unsure) { push(); delete arr[i].unsure; } close(); };
+      row.appendChild(del); row.appendChild(ok); sheet.appendChild(row);
+    };
+    const set = (nt) => { push(); arr[i] = nt; close(); };
+    const close = () => { $('sheetBg').classList.add('hidden'); save(); render(); };
+    $('sheetBg').onclick = (e) => { if (e.target === $('sheetBg')) close(); };
+    draw(); $('sheetBg').classList.remove('hidden');
+  }
+
+  // ---------- cámara + visión offline ----------
+  const BASE = location.href.replace(/[^/]*$/, '');
+  let stream = null, modelReady = false;
+  const video = $('video'), still = $('still');
+  const setStatus = s => $('camStatus').textContent = s;
+  const scanBtns = () => [$('scanRack'), $('scanTable')];
+  function updateButtons(busy) {
+    scanBtns().forEach(b => b.disabled = busy || !stream || !modelReady);
+    $('camToggle').textContent = stream ? 'Apagar cámara' : 'Activar cámara';
+  }
+  setStatus('Cargando modelo…');
+  Vision.init(BASE).then(() => { modelReady = true; setStatus(stream ? 'Listo' : 'Modelo listo · activa la cámara'); updateButtons(false); })
+    .catch(e => { setStatus('Error cargando el modelo'); console.error(e); });
+
+  async function startCam() {
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1440 } } });
+      video.srcObject = stream; await video.play().catch(() => {});
+      still.classList.add('hidden'); video.classList.remove('hidden');
+      setStatus(modelReady ? 'Listo' : 'Cargando modelo…');
+      try { localStorage.setItem('rummi-cam', '1'); } catch (e) {}
+    } catch (e) {
+      stream = null;
+      toast(e && e.name === 'NotAllowedError' ? 'Permiso de cámara denegado. Actívalo en Ajustes › Safari › Cámara.' : 'No puedo abrir la cámara.', 4000);
+    }
+    updateButtons(false);
+  }
+  function stopCam() { if (stream) stream.getTracks().forEach(t => t.stop()); stream = null; setStatus('Cámara apagada'); updateButtons(false); }
+  $('camToggle').onclick = () => stream ? stopCam() : startCam();
+  // si ya dio permiso antes, encenderla sola
+  try { if (localStorage.getItem('rummi-cam') === '1') startCam(); } catch (e) {}
+
+  function grabFrame() {
+    const c = document.createElement('canvas'); c.width = video.videoWidth; c.height = video.videoHeight;
+    c.getContext('2d').drawImage(video, 0, 0); return c;
+  }
+  function sharpness(c) {
+    const s = document.createElement('canvas'), W = 240, H = Math.round(240 * c.height / c.width);
+    s.width = W; s.height = H; const x = s.getContext('2d', { willReadFrequently: true }); x.drawImage(c, 0, 0, W, H);
+    const d = x.getImageData(0, 0, W, H).data; let sum = 0, sum2 = 0, n = 0;
+    const g = i => 0.3 * d[i] + 0.59 * d[i + 1] + 0.11 * d[i + 2];
+    for (let y = 1; y < H - 1; y++) for (let xx = 1; xx < W - 1; xx++) {
+      const i = 4 * (y * W + xx);
+      const lap = 4 * g(i) - g(i - 4) - g(i + 4) - g(i - 4 * W) - g(i + 4 * W);
+      sum += lap; sum2 += lap * lap; n++;
+    }
+    return sum2 / n - (sum / n) ** 2;
+  }
+  async function bestFrame() {
+    let best = null, bs = -1;
+    for (let k = 0; k < 5; k++) {
+      const f = grabFrame(), s = sharpness(f);
+      if (s > bs) { bs = s; best = f; }
+      await new Promise(r => setTimeout(r, 110));
+    }
+    return best;
+  }
+
+  const SHORT = ['ne', 'ro', 'az', 'na', 'am', 've'];
+  function drawOverlay(src, tiles) {
+    still.width = src.width; still.height = src.height;
+    const x = still.getContext('2d'); x.drawImage(src, 0, 0);
+    const lw = Math.max(2, src.width / 400);
+    x.font = `bold ${Math.round(src.width / 40)}px -apple-system, sans-serif`;
+    for (const t of tiles) {
+      x.strokeStyle = t.unsure ? '#ff9f1c' : '#2ee66b'; x.lineWidth = lw;
+      x.beginPath(); x.arc(t.cx, t.cy, t.w * 0.45, 0, 7); x.stroke();
+      x.beginPath(); x.moveTo(t.cx, t.cy); x.lineTo(t.cx + t.ux * t.w * 0.6, t.cy + t.uy * t.w * 0.6); x.stroke();
+      const lbl = t.num === 0 ? '☺' : String(t.num);
+      x.lineWidth = lw * 2.5; x.strokeStyle = '#000'; x.strokeText(lbl, t.cx + t.w * 0.35, t.cy - t.w * 0.35);
+      x.fillStyle = t.num === 0 ? '#fff' : ed().css[t.color]; x.fillText(lbl, t.cx + t.w * 0.35, t.cy - t.w * 0.35);
+    }
+    still.classList.remove('hidden'); video.classList.add('hidden');
+  }
+  const toTile = t => { const o = t.num === 0 ? { joker: true } : { c: t.color, n: t.num }; if (t.unsure) o.unsure = true; return o; };
+
+  async function scan(mode, srcCanvas) {
+    if (!modelReady) { toast('El modelo aún se está cargando'); return; }
+    updateButtons(true); setStatus('Leyendo fichas…');
+    try {
+      const src = srcCanvas || await bestFrame();
+      const r = await Vision.analyze(src, mode);
+      push();
+      if (mode === 'rack') { state.hand = r.rack.map(toTile); zone = 'hand'; drawOverlay(src, r.rack); }
+      else { state.sets = r.sets.map(s => s.map(toTile)); state.cur = -1; state.melded = state.melded || state.sets.length > 0; zone = 'table'; drawOverlay(src, r.all); }
+      save(); render();
+      const nu = (mode === 'rack' ? r.rack : r.all).filter(t => t.unsure).length;
+      const bad = mode === 'rack' ? 0 : state.sets.filter(s => !S.validSet(s, C())).length;
+      setStatus(`${mode === 'rack' ? r.rack.length + ' fichas' : r.sets.length + ' sets · ' + r.all.length + ' fichas'} · ${r.ms} ms · toca para volver al vídeo`);
+      toast(nu || bad ? `Revisa: ${nu} dudosas${bad ? ', ' + bad + ' sets en rojo' : ''}` : 'Lectura completa', 2500);
+      logScan(mode, src, r);
+    } catch (e) { console.error(e); toast('No he podido leer la imagen', 3000); setStatus('Error'); }
+    updateButtons(false);
+  }
+  $('scanRack').onclick = () => scan('rack');
+  $('scanTable').onclick = () => scan('table');
+  $('camWrap').onclick = () => { if (!still.classList.contains('hidden') && stream) { still.classList.add('hidden'); video.classList.remove('hidden'); setStatus('Listo'); } };
+  $('photoIn').onchange = async e => {
+    const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+    const bmp = await createImageBitmap(f); const c = document.createElement('canvas');
+    const sc = Math.min(1, 2400 / Math.max(bmp.width, bmp.height));
+    c.width = Math.round(bmp.width * sc); c.height = Math.round(bmp.height * sc); c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+    scan($('photoWhat').value, c);
+  };
+
+  // ---------- registro de datos para reentrenar (solo en este móvil) ----------
+  let dbp = null;
+  function db() {
+    if (dbp) return dbp;
+    dbp = new Promise((res, rej) => {
+      try {
+        const r = indexedDB.open('rummi-data', 1);
+        r.onupgradeneeded = () => r.result.createObjectStore('scans', { keyPath: 'id', autoIncrement: true });
+        r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+      } catch (e) { rej(e); }
+    });
+    return dbp;
+  }
+  let lastScan = { rack: null, table: null };
+  async function logScan(mode, src, r) {
+    try {
+      const sc = Math.min(1, 1600 / Math.max(src.width, src.height));
+      const c = document.createElement('canvas'); c.width = Math.round(src.width * sc); c.height = Math.round(src.height * sc);
+      c.getContext('2d').drawImage(src, 0, 0, c.width, c.height);
+      const blob = await new Promise(res => c.toBlob(res, 'image/jpeg', 0.9));
+      const preds = r.all.map(t => ({ cx: t.cx * sc, cy: t.cy * sc, ux: t.ux, uy: t.uy, w: t.w * sc, num: t.num, color: t.color, pn: t.pn }));
+      const d = await db();
+      const id = await new Promise((res, rej) => { const tx = d.transaction('scans', 'readwrite'); const q = tx.objectStore('scans').add({ ts: Date.now(), mode, edition: state.cfg.edition, jpeg: blob, preds }); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); });
+      lastScan[mode] = id;
+    } catch (e) { /* sin almacenamiento: no pasa nada */ }
+  }
+  async function attachLabels() {
+    try {
+      const d = await db();
+      for (const mode of ['rack', 'table']) {
+        const id = lastScan[mode]; if (id == null) continue;
+        const tx = d.transaction('scans', 'readwrite'), st = tx.objectStore('scans');
+        const g = st.get(id);
+        g.onsuccess = () => { const rec = g.result; if (!rec) return; rec.labels = mode === 'rack' ? clone(state.hand) : clone(state.sets); st.put(rec); };
+      }
+    } catch (e) {}
+  }
+  async function exportData() {
+    const d = await db();
+    const all = await new Promise((res, rej) => { const q = d.transaction('scans').objectStore('scans').getAll(); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); });
+    const b64 = b => new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(b); });
+    const rows = [];
+    for (const s of all) rows.push(JSON.stringify({ ...s, jpeg: await b64(s.jpeg) }));
+    const blob = new Blob([rows.join('\n')], { type: 'application/x-ndjson' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `rummikub-datos-${new Date().toISOString().slice(0, 10)}.jsonl`; a.click();
+    toast(`${all.length} escaneos exportados (${all.filter(s => s.labels).length} con correcciones)`, 3000);
+  }
+  async function countData() {
+    try { const d = await db(); return await new Promise(res => { const q = d.transaction('scans').objectStore('scans').count(); q.onsuccess = () => res(q.result); q.onerror = () => res(0); }); } catch (e) { return 0; }
+  }
+
+  // ---------- controles ----------
+  document.querySelectorAll('#zoneSeg button').forEach(b=> b.onclick=()=>{ zone=b.dataset.z; render(); });
+  $('newSet').onclick = () => { push(); state.sets.push([]); state.cur = state.sets.length-1; save(); render(); };
+  $('undo').onclick = ()=>{ if(!history.length) return; state=JSON.parse(history.pop()); save(); render(); };
+  $('clearZone').onclick = ()=>{ push(); if (zone==='hand') state.hand=[]; else { state.sets=[]; state.cur=-1; } save(); render(); toast('Zona vaciada (puedes deshacer)'); };
+  $('melded').onchange = e => { state.melded = e.target.checked; save(); };
+  $('newGame').onclick = ()=>{ push(); state = fresh(state.cfg); save(); zone='hand'; $('result').classList.add('hidden'); render(); toast('Nueva partida (puedes deshacer)'); };
+  $('settingsBtn').onclick = () => {
+    const sheet = $('sheet');
+    sheet.innerHTML = `<div class="title"><span>Tu juego</span></div>
+      <div class="row between" style="margin:8px 0"><span>Edición</span><select id="sEd">${Object.entries(EDITIONS).map(([k,v])=>`<option value="${k}" ${k===state.cfg.edition?'selected':''}>${v.label}</option>`).join('')}</select></div>
+      <div class="row between" style="margin:8px 0"><span>Copias de cada ficha</span><select id="sCp">${[2,3].map(n=>`<option ${n===state.cfg.copies?'selected':''}>${n}</option>`).join('')}</select></div>
+      <div class="row between" style="margin:8px 0"><span>Comodines</span><select id="sJk">${[2,3,4].map(n=>`<option ${n===state.cfg.jokers?'selected':''}>${n}</option>`).join('')}</select></div>
+      <p class="note">Reglas oficiales: primera bajada de 30 puntos, escaleras del mismo color, grupos del mismo número con colores distintos (hasta uno por color).</p>
+      <button class="btn ghost" id="sOk" style="width:100%;margin-top:8px">Guardar</button>
+      <button class="btn ghost small" id="sExp" style="width:100%;margin-top:10px">⬇︎ Exportar datos de entrenamiento</button>
+      <p class="note">Cada escaneo y tus correcciones se guardan solo en este móvil, para reentrenar el modelo con fotos reales.</p>`;
+    $('sheetBg').onclick = (e) => { if (e.target === $('sheetBg')) $('sheetBg').classList.add('hidden'); };
+    countData().then(n => { const b = $('sExp'); if (b) b.textContent = `⬇︎ Exportar datos de entrenamiento (${n})`; });
+    $('sExp').onclick = () => exportData().catch(() => toast('No se pudo exportar'));
+    $('sOk').onclick = () => {
+      const ne = $('sEd').value;
+      if (ne !== state.cfg.edition) { push(); state = fresh({ edition:ne, copies:+$('sCp').value, jokers:+$('sJk').value }); color=0; toast('Edición cambiada: partida reiniciada'); }
+      else { state.cfg.copies = +$('sCp').value; state.cfg.jokers = +$('sJk').value; }
+      save(); $('sheetBg').classList.add('hidden'); render();
+    };
+    $('sheetBg').classList.remove('hidden');
+  };
+
+  // ---------- cálculo ----------
+  const clean = t => t.joker ? { joker:true } : { c:t.c, n:t.n };
+  $('solveBtn').onclick = () => {
+    if (!state.hand.length) { toast('Primero añade tus fichas'); return; }
+    const bad = state.sets.filter(s=>!S.validSet(s, C())).length;
+    const btn = $('solveBtn'); btn.disabled = true; btn.innerHTML = '<span class="spinner" style="border-color:#0004;border-top-color:#000"></span>Calculando…';
+    setTimeout(() => {
+      try {
+        const res = S.recommend({ hand: state.hand.map(clean), tableSets: state.sets.map(s=>s.map(clean)), hasMelded: state.melded, cfg: solverCfg() });
+        showResult(res, bad); attachLabels();
+      } finally { btn.disabled = false; btn.textContent = 'Calcular mejor jugada'; }
+    }, 30);
+  };
+
+  function showResult(res, bad){
+    lastResult = res;
+    const box = $('result'); box.innerHTML=''; box.classList.remove('hidden');
+    const add = (html, cls) => { const e=document.createElement(cls&&cls.tag||'p'); if(cls&&cls.c) e.className=cls.c; e.innerHTML=html; box.appendChild(e); return e; };
+    if (bad) add(`⚠️ Hay ${bad} set${bad>1?'s':''} de la mesa que no son válidos. Revísalos (en rojo) para que la jugada sea fiable.`, {c:'note warn'});
+    if (!res.possible) {
+      add('Roba una ficha', {tag:'h2'});
+      add(res.meldMode ? 'Aún no puedes sumar 30 puntos con combinaciones de tu atril.' : (res.tableInvalid && bad ? 'La mesa leída no cuadra: corrige los sets en rojo.' : 'Ninguna reorganización de la mesa te permite colocar fichas.'), {c:'note'});
+    } else {
+      const title = res.mode==='meld' ? `Primera bajada: ${res.played} fichas (${res.points} pts)`
+                  : res.mode==='simple' ? `Coloca ${res.played} ficha${res.played>1?'s':''} (${res.points} pts)`
+                  : `Jugada máxima: ${res.played} fichas (${res.points} pts)`;
+      add(title, {tag:'h2'});
+      add(res.mode==='meld' ? 'Solo con fichas de tu atril. La mesa no se toca.'
+        : res.mode==='simple' ? 'Sin romper ningún set: solo añades fichas o haces sets nuevos.'
+        : 'Hay que reorganizar la mesa. Así quedan los sets que cambian; el resto sigue igual.', {c:'note'});
+      const shown = res.sets.filter(s => !s.unchanged);
+      shown.sort((a,b) => (b.tiles.some(t=>t.fromHand)) - (a.tiles.some(t=>t.fromHand)));
+      shown.forEach(s => {
+        const row=document.createElement('div'); row.className='set';
+        const tag=document.createElement('span'); tag.className='tag';
+        tag.textContent = res.mode==='meld' || s.isNew ? 'nuevo' : s.extended ? 'añadir' : 'reorganizar';
+        row.appendChild(tag);
+        const tl=document.createElement('div'); tl.className='tiles'; tl.style.minHeight='0';
+        const ordered = s.type==='grupo' ? s.tiles.slice().sort((a,b)=>a.c-b.c) : s.tiles;
+        ordered.forEach(t=> tl.appendChild(tileEl(t,{isNew:t.fromHand, rep:true})));
+        row.appendChild(tl); box.appendChild(row);
+      });
+      const unch = res.sets.filter(s=>s.unchanged).length;
+      if (unch && res.mode!=='meld') add(`${unch} sets de la mesa sin cambios.`, {c:'note'});
+      if (res.mode==='full' && res.simplePlayed !== undefined) {
+        const b = document.createElement('button'); b.className='btn ghost small'; b.style.marginTop='8px';
+        b.textContent = res.simplePlayed > 0 ? `Ver jugada sin reorganizar (${res.simplePlayed} ficha${res.simplePlayed>1?'s':''})` : 'Sin reorganizar no puedes colocar nada';
+        b.disabled = !(res.simplePlayed > 0);
+        b.onclick = () => { const s = S.solveSimple({ hand: state.hand.map(clean), tableSets: state.sets.map(x=>x.map(clean)), cfg: solverCfg() }); showResult({ possible:true, ...s, mode:'simple' }, 0); };
+        box.appendChild(b);
+      }
+      const ap=document.createElement('button'); ap.className='btn ghost'; ap.style.marginTop='12px'; ap.style.width='100%';
+      ap.textContent='✓ He hecho esta jugada'; ap.onclick=applyMove; box.appendChild(ap);
+    }
+    box.scrollIntoView({behavior:'smooth', block:'start'});
+  }
+
+  function applyMove(){
+    const res = lastResult; if(!res || !res.possible) return;
+    push();
+    const played = res.sets.flatMap(s => s.tiles.filter(t => t.fromHand));
+    for (const t of played) { const i = state.hand.findIndex(x => keyOf(x) === (t.joker ? 'J' : t.c+'-'+t.n)); if (i>=0) state.hand.splice(i,1); }
+    const newSets = res.sets.map(s => s.tiles.map(t => t.joker ? { joker:true } : { c:t.c, n:t.n }));
+    state.sets = res.mode==='meld' ? state.sets.concat(newSets) : newSets;
+    state.cur = -1; state.melded = true; save(); render(); $('result').classList.add('hidden');
+    toast(state.hand.length ? 'Jugada aplicada' : '¡Rummikub! 🎉');
+  }
+
+  render();
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+})();
+</script>
+</body>
+</html>
