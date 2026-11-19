@@ -144,8 +144,10 @@
   const clone = o => JSON.parse(JSON.stringify(o));
   function load(){ try { return JSON.parse(localStorage.getItem('rummi-v2')); } catch(e){ return null; } }
   function save(){ try { localStorage.setItem('rummi-v2', JSON.stringify(state)); } catch(e){} }
-  const fresh = (cfg) => ({ hand:[], sets:[], cur:-1, melded:false, cfg: cfg || { edition:'seis', copies:2, jokers:2 } });
+  const fresh = (cfg) => ({ hand:[], sets:[], cur:-1, melded:false, cfg: cfg || { edition:'seis', copies:2, jokers:4, v:2 } });
   let state = load() || fresh();
+  // tu juego: 2 copias de cada ficha y 4 comodines (aplica también a partidas guardadas)
+  if (!state.cfg.v || state.cfg.v < 2) { state.cfg.copies = 2; state.cfg.jokers = 4; state.cfg.v = 2; }
   let zone = 'hand', color = 0, history = [], lastResult = null;
   const ed = () => EDITIONS[state.cfg.edition];
   const C = () => ed().names.length;
