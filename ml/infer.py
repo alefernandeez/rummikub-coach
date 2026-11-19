@@ -42,17 +42,22 @@ class Pipeline:
             X = np.stack([crop_tile(img, d['cx'], d['cy'], d['ux'], d['uy'], d['w']) for d in ds])
             x = (X.astype(np.float32) / 255 - 0.5).transpose(0, 3, 1, 2)
             n, c, f = s.cls.run(None, {'x': x})
-            return softmax(n), softmax(c), softmax(f)
-        n, c, f = run(dets)
+            reg = X[:, int(CH * 0.62):int(CH * 0.9), int(CW * 0.15):int(CW * 0.85)].reshape(len(ds), -1, 3).mean(1).astype(np.uint8)
+            lab = cv2.cvtColor(reg[None], cv2.COLOR_RGB2LAB)[0].astype(float)
+            lab[:, 0] *= 100 / 255; lab[:, 1:] -= 128
+            return softmax(n), softmax(c), softmax(f), lab
+        n, c, f, lab = run(dets)
         flipped = [i for i in range(len(dets)) if f[i, 1] > 0.5]
         if flipped:
             for i in flipped: dets[i]['ux'] *= -1; dets[i]['uy'] *= -1
-            n2, c2, f2 = run([dets[i] for i in flipped])
-            for k, i in enumerate(flipped): n[i], c[i], f[i] = n2[k], c2[k], f2[k]
+            n2, c2, f2, l2 = run([dets[i] for i in flipped])
+            for k, i in enumerate(flipped): n[i], c[i], f[i], lab[i] = n2[k], c2[k], f2[k], l2[k]
         out = []
+        med = np.median(lab, 0)
         for i, d in enumerate(dets):
             k = int(n[i].argmax())
             if k == 14: continue
+            if len(dets) >= 4 and (lab[i, 0] - med[0] < -16 or np.hypot(*(lab[i, 1:] - med[1:])) > 15): continue
             d.update(num=k, color=int(c[i].argmax()), pn=float(n[i].max()), pc=float(c[i].max()))
             d['unsure'] = bool(d['pn'] < 0.7 or (k != 0 and d['pc'] < 0.7))
             out.append(d)

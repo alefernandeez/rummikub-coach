@@ -22,6 +22,14 @@
     const e = []; let s = 0; for (let i = 0; i < n; i++) { e.push(Math.exp(arr[off + i] - m)); s += e[i]; }
     return e.map(v => v / s);
   }
+  function toLab(r, g, b) {
+    const f = c => { c /= 255; return c > 0.04045 ? Math.pow((c + 0.055) / 1.055, 2.4) : c / 12.92; };
+    const R = f(r), G = f(g), B = f(b);
+    const X = (R * 0.4124 + G * 0.3576 + B * 0.1805) / 0.95047, Y = R * 0.2126 + G * 0.7152 + B * 0.0722, Z = (R * 0.0193 + G * 0.1192 + B * 0.9505) / 1.08883;
+    const h = t => t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116;
+    return [116 * h(Y) - 16, 500 * (h(X) - h(Y)), 200 * (h(Y) - h(Z))];
+  }
+  const median = a => { const b = a.slice().sort((x, y) => x - y); return b.length ? b[b.length >> 1] : 0; };
   const argmax = a => a.reduce((bi, v, i, ar) => v > ar[bi] ? i : bi, 0);
 
   // src: canvas con la imagen a resolución completa
@@ -83,7 +91,15 @@
       data[q] = px[p] / 255 - 0.5; data[q + S] = px[p + 1] / 255 - 0.5; data[q + 2 * S] = px[p + 2] / 255 - 0.5;
     }
     const r = await cls.run({ x: new ort.Tensor('float32', data, [n, 3, CH, CW]) });
-    return ds.map((_, k) => ({ num: softmax(r.num.data, k * 15, 15), col: softmax(r.col.data, k * 6, 6), flip: softmax(r.flip.data, k * 2, 2) }));
+    // color medio (Lab) de la zona del hueco redondo: en una ficha real siempre es crema
+    const base = ds.map((_, k) => {
+      let R = 0, G = 0, B = 0, m = 0;
+      for (let y = Math.floor(CH * 0.62); y < Math.floor(CH * 0.9); y++) for (let x = Math.floor(CW * 0.15); x < Math.floor(CW * 0.85); x++) {
+        const p = 4 * (y * cv.width + k * CW + x); R += px[p]; G += px[p + 1]; B += px[p + 2]; m++;
+      }
+      return toLab(R / m, G / m, B / m);
+    });
+    return ds.map((_, k) => ({ num: softmax(r.num.data, k * 15, 15), col: softmax(r.col.data, k * 6, 6), flip: softmax(r.flip.data, k * 2, 2), lab: base[k] }));
   }
 
   async function classify(src, dets) {
@@ -97,8 +113,13 @@
       flipped.forEach((i, k) => res[i] = r2[k]);
     }
     const out = [];
+    const mL = median(res.map(r => r.lab[0])), mA = median(res.map(r => r.lab[1])), mB = median(res.map(r => r.lab[2]));
     dets.forEach((d, i) => {
       const k = argmax(res[i].num); if (k === 14) return;
+      if (dets.length >= 4) {
+        const [L, A, B] = res[i].lab;
+        if (L - mL < -16 || Math.hypot(A - mA, B - mB) > 15) return;   // no es una ficha (piel, ropa, objetos)
+      }
       const c = argmax(res[i].col), pn = res[i].num[k], pc = res[i].col[c];
       out.push({ ...d, num: k, color: c, pn, pc, unsure: pn < 0.7 || (k !== 0 && pc < 0.7) });
     });
@@ -134,7 +155,9 @@
     const tiles = await classify(src, await detect(src));
     const ms = Math.round(performance.now() - t0);
     if (mode === 'rack') return { rack: rackFilter(tiles), all: tiles, ms };
-    return { sets: groupSets(tiles), all: tiles, ms };
+    // fuera detecciones dudosas y aisladas (suelen ser falsos positivos fuera de la mesa)
+    const sets = groupSets(tiles).filter(g => !(g.length === 1 && g[0].pn < 0.7));
+    return { sets, all: sets.flat(), ms };
   }
 
   root.Vision = { init, analyze, detect, classify, groupSets };
