@@ -50,41 +50,46 @@
       this.tiles.push(t); return t;
     }
 
-    // Alinea el fotograma con el mapa. Devuelve T (fotograma -> mapa) o null.
+    // Alinea el fotograma con el mapa SIN depender de que los números estén bien leídos:
+    // cada hipótesis empareja una detección con una ficha del mapa (tamaño y giro dan escala y rotación)
+    // y se cuentan cuántas detecciones caen encima de fichas del mapa con la misma orientación.
+    // Coincidir también en número suma un poco. Devuelve T (fotograma -> mapa) o null.
     register(dets) {
-      const conf = this.tiles.map(t => ({ t, s: this.status(t) })).filter(o => o.s.score >= 0.9);
-      const cand = [];
-      for (const d of dets) {
-        if (d.pn < 0.6) continue;
-        const k = keyOf(d);
-        for (const o of conf) if (o.s.key === k) cand.push([d, o.t]);
-      }
-      if (cand.length < 2) return null;
-      const wm = median(this.tiles.map(t => t.w)) || 40;
-      let best = null, bestIn = [];
-      const pairs = [];
-      if (cand.length <= 28) { for (let i = 0; i < cand.length; i++) for (let j = i + 1; j < cand.length; j++) pairs.push([i, j]); }
-      else for (let k = 0; k < 400; k++) { const i = Math.floor(Math.random() * cand.length), j = Math.floor(Math.random() * cand.length); if (i !== j) pairs.push([i, j]); }
-      for (const [i, j] of pairs) {
-        const [d1, w1] = cand[i], [d2, w2] = cand[j];
-        if (d1 === d2 || w1 === w2) continue;
-        const dp = [d2.cx - d1.cx, d2.cy - d1.cy]; if (Math.hypot(dp[0], dp[1]) < 5) continue;
-        const a = cdiv([w2.x - w1.x, w2.y - w1.y], dp);
-        const sc = Math.hypot(a[0], a[1]); if (sc < 0.3 || sc > 3.5) continue;
-        const ap = cmul(a, [d1.cx, d1.cy]); const T = { a, t: [w1.x - ap[0], w1.y - ap[1]] };
-        const inl = [], usedW = new Set(), usedD = new Set();
-        for (const [d, w] of cand) {
-          if (usedW.has(w) || usedD.has(d)) continue;
-          const [x, y] = apply(T, d.cx, d.cy);
-          if (Math.hypot(x - w.x, y - w.y) > 0.4 * wm) continue;
-          const u = rotate(T, d.ux, d.uy); if (u[0] * w.ux + u[1] * w.uy < 0.7) continue;
-          inl.push([[d.cx, d.cy], [w.x, w.y]]); usedW.add(w); usedD.add(d);
+      const D = dets.slice().sort((p, q) => q.pn - p.pn).slice(0, 30);
+      const M = this.tiles.slice().sort((p, q) => q.seen - p.seen).slice(0, 60);
+      if (D.length < 2 || M.length < 2) return null;
+      const keys = M.map(t => this.status(t).key);
+      const score = T => {
+        let n = 0, bonus = 0; const pairs = [], used = new Set();
+        for (const d of D) {
+          const [x, y] = apply(T, d.cx, d.cy), u = rotate(T, d.ux, d.uy);
+          let bj = -1, bd = Infinity;
+          for (let j = 0; j < M.length; j++) {
+            if (used.has(j)) continue;
+            const t = M[j], dd = Math.hypot(t.x - x, t.y - y);
+            if (dd < 0.4 * t.w && dd < bd && (t.ux * u[0] + t.uy * u[1]) > 0.8) { bd = dd; bj = j; }
+          }
+          if (bj >= 0) { used.add(bj); n++; if (keys[bj] === keyOf(d)) bonus += 0.5; pairs.push([[d.cx, d.cy], [M[bj].x, M[bj].y]]); }
         }
-        if (inl.length > bestIn.length) { bestIn = inl; best = T; }
+        return { s: n + bonus, n, pairs };
+      };
+      let best = null;
+      for (const d of D) for (const t of M) {
+        const s = t.w / d.w; if (s < 0.5 || s > 2.2) continue;
+        const ang = Math.atan2(t.uy, t.ux) - Math.atan2(d.uy, d.ux);
+        const a = [s * Math.cos(ang), s * Math.sin(ang)], ap = cmul(a, [d.cx, d.cy]);
+        const T = { a, t: [t.x - ap[0], t.y - ap[1]] };
+        const r = score(T);
+        if (!best || r.s > best.s) best = { ...r, T };
       }
-      const need = this.tiles.length < 6 ? 2 : 3;
-      if (!best || bestIn.length < need) return null;
-      return fit(bestIn);
+      if (!best || best.n < 2) return null;
+      // refinar con todas las parejas y volver a contar
+      let T = best.n >= 2 ? fit(best.pairs) : best.T, r = score(T);
+      if (r.n >= 2) { T = fit(r.pairs); r = score(T); }
+      const visible = Math.min(D.length, M.length);
+      if (r.n < Math.max(2, Math.round(0.35 * visible))) return null;
+      const sc = Math.hypot(T.a[0], T.a[1]); if (sc < 0.3 || sc > 3.5) return null;
+      return T;
     }
 
     // Añade un fotograma. dets en coordenadas del fotograma.
@@ -92,7 +97,15 @@
       if (!dets.length) return { ok: false, reason: 'vacio' };
       let T;
       if (!this.tiles.length) T = { a: [1, 0], t: [0, 0] };
-      else { T = this.register(dets); if (!T) { this.lost++; return { ok: false, reason: 'perdido' }; } }
+      else {
+        T = this.register(dets);
+        if (!T) {
+          this.lost++;
+          const anyFixed = this.tiles.some(t => this.status(t).fixed);
+          if (this.lost >= 3 && !anyFixed) { this.reset(); T = { a: [1, 0], t: [0, 0] }; }   // nada que perder: reanclar
+          else return { ok: false, reason: 'perdido' };
+        }
+      }
       this.lost = 0; this.frames++;
       const sc = Math.hypot(T.a[0], T.a[1]);
       const out = [];
