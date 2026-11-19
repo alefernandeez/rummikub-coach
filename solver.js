@@ -303,6 +303,12 @@
   function recommend({ hand, tableSets, hasMelded, cfg }) {
     const table = tableSets.flat();
     const full = solve({ hand, table, hasMelded, cfg });
+    if (hasMelded && !full.possible && full.tableInvalid) {
+      // mesa mal leída: jugada provisional sin tocar los sets inválidos
+      const C = cfg.colors, ok = tableSets.filter(s => validSet(s, C)), bad = tableSets.filter(s => !validSet(s, C));
+      const simple = solveSimple({ hand, tableSets: ok, cfg });
+      return { possible: simple.played > 0, ...simple, mode: 'provisional', keepSets: bad, tableInvalid: true };
+    }
     if (!hasMelded || !full.possible) return { ...full, mode: hasMelded ? 'full' : 'meld' };
     const simple = solveSimple({ hand, tableSets, cfg });
     if (simple.played >= full.played) return { possible: true, ...simple, mode: 'simple' };

@@ -122,8 +122,10 @@
 
   function rackFilter(tiles) {
     if (!tiles.length) return tiles;
-    const wmax = Math.max(...tiles.map(t => t.w));
-    return tiles.filter(t => t.w >= 0.6 * wmax).sort((a, b) => a.cx - b.cx);
+    const ref = tiles.reduce((a, b) => b.w > a.w ? b : a), h = ref.w * 1.4;
+    // fichas de pie, grandes (las más cercanas) y en la franja del atril (admite atril de dos pisos)
+    const r = tiles.filter(t => t.w >= 0.7 * ref.w && t.uy < -0.7 && Math.abs(t.cy - ref.cy) < 1.5 * h);
+    return r.sort((a, b) => Math.abs(a.cy - b.cy) > h * 0.6 ? a.cy - b.cy : a.cx - b.cx);
   }
 
   async function analyze(src, mode) {

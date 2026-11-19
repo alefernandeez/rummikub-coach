@@ -84,8 +84,8 @@ def group_sets(tiles):
 
 def rack_filter(tiles):
     if not tiles: return tiles
-    wmax = max(t['w'] for t in tiles)
-    r = [t for t in tiles if t['w'] >= 0.6 * wmax]
+    ref = max(tiles, key=lambda t: t['w']); h = ref['w'] * 1.4
+    r = [t for t in tiles if t['w'] >= 0.7 * ref['w'] and t['uy'] < -0.7 and abs(t['cy'] - ref['cy']) < 1.5 * h]
     return sorted(r, key=lambda t: t['cx'])
 
 def fmt(t):

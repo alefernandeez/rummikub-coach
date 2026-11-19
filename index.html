@@ -312,8 +312,9 @@
       x.beginPath(); x.arc(t.cx, t.cy, t.w * 0.45, 0, 7); x.stroke();
       x.beginPath(); x.moveTo(t.cx, t.cy); x.lineTo(t.cx + t.ux * t.w * 0.6, t.cy + t.uy * t.w * 0.6); x.stroke();
       const lbl = t.num === 0 ? '☺' : String(t.num);
-      x.lineWidth = lw * 2.5; x.strokeStyle = '#000'; x.strokeText(lbl, t.cx + t.w * 0.35, t.cy - t.w * 0.35);
-      x.fillStyle = t.num === 0 ? '#fff' : ed().css[t.color]; x.fillText(lbl, t.cx + t.w * 0.35, t.cy - t.w * 0.35);
+      const fs = Math.round(src.width / 40), lx = t.cx + t.w * 0.3, ly = t.cy - t.w * 0.3, tw = x.measureText(lbl).width;
+      x.fillStyle = 'rgba(255,255,255,.92)'; x.fillRect(lx - fs * 0.2, ly - fs * 0.95, tw + fs * 0.4, fs * 1.2);
+      x.fillStyle = t.num === 0 ? '#6b4e9b' : ed().css[t.color]; x.fillText(lbl, lx, ly);
     }
     still.classList.remove('hidden'); video.classList.add('hidden');
   }
@@ -451,11 +452,13 @@
       add('Roba una ficha', {tag:'h2'});
       add(res.meldMode ? 'Aún no puedes sumar 30 puntos con combinaciones de tu atril.' : (res.tableInvalid && bad ? 'La mesa leída no cuadra: corrige los sets en rojo.' : 'Ninguna reorganización de la mesa te permite colocar fichas.'), {c:'note'});
     } else {
-      const title = res.mode==='meld' ? `Primera bajada: ${res.played} fichas (${res.points} pts)`
+      const title = res.mode==='provisional' ? `Jugada provisional: ${res.played} ficha${res.played>1?'s':''} (${res.points} pts)`
+                  : res.mode==='meld' ? `Primera bajada: ${res.played} fichas (${res.points} pts)`
                   : res.mode==='simple' ? `Coloca ${res.played} ficha${res.played>1?'s':''} (${res.points} pts)`
                   : `Jugada máxima: ${res.played} fichas (${res.points} pts)`;
       add(title, {tag:'h2'});
-      add(res.mode==='meld' ? 'Solo con fichas de tu atril. La mesa no se toca.'
+      add(res.mode==='provisional' ? 'Hay sets mal leídos (en rojo): esta jugada no los toca. Corrígelos para ver la jugada óptima.'
+        : res.mode==='meld' ? 'Solo con fichas de tu atril. La mesa no se toca.'
         : res.mode==='simple' ? 'Sin romper ningún set: solo añades fichas o haces sets nuevos.'
         : 'Hay que reorganizar la mesa. Así quedan los sets que cambian; el resto sigue igual.', {c:'note'});
       const shown = res.sets.filter(s => !s.unchanged);
@@ -491,7 +494,7 @@
     const played = res.sets.flatMap(s => s.tiles.filter(t => t.fromHand));
     for (const t of played) { const i = state.hand.findIndex(x => keyOf(x) === (t.joker ? 'J' : t.c+'-'+t.n)); if (i>=0) state.hand.splice(i,1); }
     const newSets = res.sets.map(s => s.tiles.map(t => t.joker ? { joker:true } : { c:t.c, n:t.n }));
-    state.sets = res.mode==='meld' ? state.sets.concat(newSets) : newSets;
+    state.sets = res.mode==='meld' ? state.sets.concat(newSets) : newSets.concat((res.keepSets||[]).map(s => s.map(t => t.joker ? { joker:true } : { c:t.c, n:t.n })));
     state.cur = -1; state.melded = true; save(); render(); $('result').classList.add('hidden');
     toast(state.hand.length ? 'Jugada aplicada' : '¡Rummikub! 🎉');
   }
