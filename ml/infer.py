@@ -34,7 +34,10 @@ class Pipeline:
             ux, uy = out[1, y, x_], out[2, y, x_]; n = math.hypot(ux, uy) + 1e-6
             w = math.exp(out[3, y, x_]) * 4
             dets.append(dict(cx=cx * 4 / sc, cy=cy * 4 / sc, ux=ux / n, uy=uy / n, w=w / sc, score=float(hm[y, x_])))
-        return dets
+        dets.sort(key=lambda d: -d['score']); keep = []
+        for d in dets:
+            if not any(math.hypot(k['cx'] - d['cx'], k['cy'] - d['cy']) < 0.5 * max(k['w'], d['w']) for k in keep): keep.append(d)
+        return keep
 
     def classify(s, img, dets):
         if not dets: return dets

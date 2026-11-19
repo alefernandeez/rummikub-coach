@@ -8,6 +8,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Rummikub">
 <link rel="apple-touch-icon" href="icon.png">
+<link rel="icon" href="icon.png">
 <style>
   :root { --bg:#0f3d2e; --felt:#14513d; --tile:#f6efd9; --tile-edge:#d8cba4; --ink:#f3f3ee; --muted:#a9c4b6; --accent:#ffd34d; --bad:#ff6b6b; }
   * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
@@ -68,30 +69,33 @@
   select { background:var(--tile); border-radius:8px; padding:6px; font-size:15px; }
   .camwrap { position:relative; width:100%; aspect-ratio:3/4; background:#000; border-radius:12px; overflow:hidden; }
   .camwrap video, .camwrap canvas { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
-  .camwrap canvas { object-fit:contain; }
+  .camwrap canvas { pointer-events:none; }
+  .camwrap:not(.on) video { opacity:.35; }
+  .stats { position:absolute; left:8px; top:8px; display:flex; gap:6px; }
+  .stats span { background:#000a; color:#fff; font-size:14px; padding:5px 9px; border-radius:12px; }
+  .camstatus { right:8px; }
+  .btn.stop { background:#e5484d; color:#fff; }
   .camstatus { position:absolute; left:8px; bottom:8px; background:#000a; color:#fff; font-size:13px; padding:5px 9px; border-radius:12px; }
 </style>
 </head>
 <body>
-<header><div><h1 style="display:inline">Rummikub Coach</h1><span class="ver">v0.3 · offline</span></div>
+<header><div><h1 style="display:inline">Rummikub Coach</h1><span class="ver">v0.4 · escaneo en vivo</span></div>
   <button class="btn ghost small" id="settingsBtn">⚙︎ Juego</button></header>
 <main>
   <div class="card">
-    <div class="camwrap" id="camWrap">
+    <div class="seg" id="focusSeg"><button data-f="rack" class="on">Enfoco mi atril</button><button data-f="table">Enfoco la mesa</button></div>
+    <div class="camwrap" id="camWrap" style="margin-top:10px">
       <video id="video" playsinline muted autoplay></video>
-      <canvas id="still" class="hidden"></canvas>
-      <div class="camstatus" id="camStatus">Cámara apagada</div>
+      <canvas id="live"></canvas>
+      <div class="stats"><span id="statRack"><b>Atril</b> 0 ✓</span><span id="statTable"><b>Mesa</b> 0 ✓</span></div>
+      <div class="camstatus" id="camStatus">Cargando…</div>
     </div>
-    <div class="row" style="margin-top:10px">
-      <button class="btn cam" id="scanRack" disabled>📷 Escanear atril</button>
-      <button class="btn cam" id="scanTable" disabled>📷 Escanear mesa</button>
-    </div>
+    <button class="btn primary" id="scanBtn" style="margin-top:10px" disabled>▶ Empezar a escanear</button>
     <div class="row between" style="margin-top:8px">
-      <button class="btn ghost small" id="camToggle">Activar cámara</button>
-      <span class="row" style="gap:6px"><label class="btn ghost small" style="cursor:pointer">🖼 Desde foto<input type="file" accept="image/*" id="photoIn" class="hidden"></label>
-      <select id="photoWhat" aria-label="La foto es de"><option value="table">Mesa</option><option value="rack">Atril</option></select></span>
+      <button class="btn ghost small" id="redoFocus">↺ Repetir esta zona</button>
+      <label class="btn ghost small" style="cursor:pointer">🖼 Desde foto<input type="file" accept="image/*" id="photoIn" class="hidden"></label>
     </div>
-    <p class="note">Apunta al atril o a la mesa y pulsa escanear: la app coge el fotograma más nítido. Revisa lo leído (borde naranja discontinuo = dudosa) y toca cualquier ficha para corregirla.</p>
+    <p class="note">Pulsa Empezar, enfoca tu atril y luego cambia a la mesa y recórrela despacio. <b style="color:#2ee66b">Verde</b> = ficha fijada; <b style="color:#ffb347">naranja</b> = acércate hasta que se ponga verde. Al terminar se apaga la cámara y te doy la jugada.</p>
   </div>
 
   <div class="card">
@@ -131,6 +135,7 @@
 <script src="vendor/ort.wasm.min.js"></script>
 <script src="solver.js"></script>
 <script src="vision.js"></script>
+<script src="live.js"></script>
 <script>
 (function(){
   const S = window.RummiSolver;
@@ -245,110 +250,174 @@
     draw(); $('sheetBg').classList.remove('hidden');
   }
 
-  // ---------- cámara + visión offline ----------
+  // ---------- escaneo continuo (cámara + visión offline) ----------
   const BASE = location.href.replace(/[^/]*$/, '');
-  let stream = null, modelReady = false;
-  const video = $('video'), still = $('still');
+  let stream = null, modelReady = false, scanning = false, focus = 'rack';
+  const worlds = { rack: new LiveScan.World('rack'), table: new LiveScan.World('table') };
+  const lastFrames = { rack: null, table: null };
+  const video = $('video'), live = $('live');
   const setStatus = s => $('camStatus').textContent = s;
-  const scanBtns = () => [$('scanRack'), $('scanTable')];
-  function updateButtons(busy) {
-    scanBtns().forEach(b => b.disabled = busy || !stream || !modelReady);
-    $('camToggle').textContent = stream ? 'Apagar cámara' : 'Activar cámara';
-  }
-  setStatus('Cargando modelo…');
-  Vision.init(BASE).then(() => { modelReady = true; setStatus(stream ? 'Listo' : 'Modelo listo · activa la cámara'); updateButtons(false); })
+  Vision.init(BASE).then(() => { modelReady = true; setStatus('Listo · pulsa Empezar'); $('scanBtn').disabled = false; })
     .catch(e => { setStatus('Error cargando el modelo'); console.error(e); });
+  setStatus('Cargando modelo…');
 
   async function startCam() {
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1440 } } });
-      video.srcObject = stream; await video.play().catch(() => {});
-      still.classList.add('hidden'); video.classList.remove('hidden');
-      setStatus(modelReady ? 'Listo' : 'Cargando modelo…');
-      try { localStorage.setItem('rummi-cam', '1'); } catch (e) {}
-    } catch (e) {
-      stream = null;
-      toast(e && e.name === 'NotAllowedError' ? 'Permiso de cámara denegado. Actívalo en Ajustes › Safari › Cámara.' : 'No puedo abrir la cámara.', 4000);
-    }
-    updateButtons(false);
+    stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1440 } } });
+    video.srcObject = stream; await video.play().catch(() => {});
+    await new Promise(r => { if (video.videoWidth) r(); else video.onloadedmetadata = () => r(); });
   }
-  function stopCam() { if (stream) stream.getTracks().forEach(t => t.stop()); stream = null; setStatus('Cámara apagada'); updateButtons(false); }
-  $('camToggle').onclick = () => stream ? stopCam() : startCam();
-  // si ya dio permiso antes, encenderla sola
-  try { if (localStorage.getItem('rummi-cam') === '1') startCam(); } catch (e) {}
+  function stopCam() { if (stream) stream.getTracks().forEach(t => t.stop()); stream = null; video.srcObject = null; }
 
   function grabFrame() {
     const c = document.createElement('canvas'); c.width = video.videoWidth; c.height = video.videoHeight;
     c.getContext('2d').drawImage(video, 0, 0); return c;
   }
   function sharpness(c) {
-    const s = document.createElement('canvas'), W = 240, H = Math.round(240 * c.height / c.width);
+    const s = document.createElement('canvas'), W = 200, H = Math.round(200 * c.height / c.width);
     s.width = W; s.height = H; const x = s.getContext('2d', { willReadFrequently: true }); x.drawImage(c, 0, 0, W, H);
-    const d = x.getImageData(0, 0, W, H).data; let sum = 0, sum2 = 0, n = 0;
+    const d = x.getImageData(0, 0, W, H).data; let s1 = 0, s2 = 0, n = 0;
     const g = i => 0.3 * d[i] + 0.59 * d[i + 1] + 0.11 * d[i + 2];
-    for (let y = 1; y < H - 1; y++) for (let xx = 1; xx < W - 1; xx++) {
-      const i = 4 * (y * W + xx);
-      const lap = 4 * g(i) - g(i - 4) - g(i + 4) - g(i - 4 * W) - g(i + 4 * W);
-      sum += lap; sum2 += lap * lap; n++;
+    for (let y = 1; y < H - 1; y += 2) for (let xx = 1; xx < W - 1; xx += 2) {
+      const i = 4 * (y * W + xx), l = 4 * g(i) - g(i - 4) - g(i + 4) - g(i - 4 * W) - g(i + 4 * W); s1 += l; s2 += l * l; n++;
     }
-    return sum2 / n - (sum / n) ** 2;
+    return s2 / n - (s1 / n) ** 2;
   }
-  async function bestFrame() {
-    let best = null, bs = -1;
-    for (let k = 0; k < 5; k++) {
-      const f = grabFrame(), s = sharpness(f);
-      if (s > bs) { bs = s; best = f; }
-      await new Promise(r => setTimeout(r, 110));
-    }
+
+  // ---- marcas sobre el vídeo, pegadas a las fichas aunque se mueva el móvil ----
+  // Se dibujan sobre el último fotograma analizado y se desplazan con el vídeo en vivo:
+  // en cada imagen se busca el desplazamiento que mejor encaja una miniatura con la del fotograma analizado.
+  const TW_ = 96;
+  let marks = null;   // { frameW, frameH, ref: Uint8 gris, rw, rh, items:[{cx,cy,r,fixed,lbl,col}] }
+  const tcv = document.createElement('canvas'), tctx = tcv.getContext('2d', { willReadFrequently: true });
+  function thumbGray(src, w, h) {
+    tcv.width = w; tcv.height = h; tctx.drawImage(src, 0, 0, w, h);
+    const d = tctx.getImageData(0, 0, w, h).data, g = new Uint8Array(w * h);
+    for (let i = 0; i < w * h; i++) g[i] = (d[4 * i] * 77 + d[4 * i + 1] * 150 + d[4 * i + 2] * 29) >> 8;
+    return g;
+  }
+  function bestShift(ref, cur, w, h) {
+    let best = [0, 0], bs = Infinity;
+    const R = 18, m = R + 1;
+    const sad = (dx, dy, step) => { let s = 0; for (let y = m; y < h - m; y += step) for (let x = m; x < w - m; x += step) s += Math.abs(ref[y * w + x] - cur[(y + dy) * w + x + dx]); return s; };
+    for (let dy = -R; dy <= R; dy += 3) for (let dx = -R; dx <= R; dx += 3) { const s = sad(dx, dy, 3); if (s < bs) { bs = s; best = [dx, dy]; } }
+    const [bx, by] = best; bs = Infinity;
+    for (let dy = by - 2; dy <= by + 2; dy++) for (let dx = bx - 2; dx <= bx + 2; dx++) { if (Math.abs(dx) > R || Math.abs(dy) > R) continue; const s = sad(dx, dy, 2); if (s < bs) { bs = s; best = [dx, dy]; } }
     return best;
   }
-
-  const SHORT = ['ne', 'ro', 'az', 'na', 'am', 've'];
-  function drawOverlay(src, tiles) {
-    still.width = src.width; still.height = src.height;
-    const x = still.getContext('2d'); x.drawImage(src, 0, 0);
-    const lw = Math.max(2, src.width / 400);
-    x.font = `bold ${Math.round(src.width / 40)}px -apple-system, sans-serif`;
-    for (const t of tiles) {
-      x.strokeStyle = t.unsure ? '#ff9f1c' : '#2ee66b'; x.lineWidth = lw;
-      x.beginPath(); x.arc(t.cx, t.cy, t.w * 0.45, 0, 7); x.stroke();
-      x.beginPath(); x.moveTo(t.cx, t.cy); x.lineTo(t.cx + t.ux * t.w * 0.6, t.cy + t.uy * t.w * 0.6); x.stroke();
-      const lbl = t.num === 0 ? '☺' : String(t.num);
-      const fs = Math.round(src.width / 40), lx = t.cx + t.w * 0.3, ly = t.cy - t.w * 0.3, tw = x.measureText(lbl).width;
-      x.fillStyle = 'rgba(255,255,255,.92)'; x.fillRect(lx - fs * 0.2, ly - fs * 0.95, tw + fs * 0.4, fs * 1.2);
-      x.fillStyle = t.num === 0 ? '#6b4e9b' : ed().css[t.color]; x.fillText(lbl, lx, ly);
+  function drawLive(frame, dets, res) {
+    const W = worlds[focus];
+    const rw = TW_, rh = Math.round(TW_ * frame.height / frame.width);
+    marks = { frameW: frame.width, frameH: frame.height, rw, rh, ref: thumbGray(frame, rw, rh), items: dets.map((d, i) => {
+      const t = res.ok ? res.matched[i] : null, st = t ? W.status(t) : null, fixed = !!(st && st.fixed);
+      let lbl = '', col = '#fff';
+      if (fixed) { const [n, c] = st.key === 'J' ? [0, 0] : st.key.split('-').map(Number); lbl = n === 0 ? '☺' : String(n); col = n === 0 ? '#6b4e9b' : ed().css[c]; }
+      return { cx: d.cx, cy: d.cy, r: d.w * 0.42, fixed, lost: !res.ok, lbl, col };
+    }) };
+  }
+  function paintMarks() {
+    requestAnimationFrame(paintMarks);
+    if (!scanning || !marks || !video.videoWidth) return;
+    const r = live.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+    if (live.width !== Math.round(r.width * dpr)) { live.width = Math.round(r.width * dpr); live.height = Math.round(r.height * dpr); }
+    const x = live.getContext('2d'); x.clearRect(0, 0, live.width, live.height);
+    const [dx, dy] = bestShift(marks.ref, thumbGray(video, marks.rw, marks.rh), marks.rw, marks.rh);
+    const k = marks.frameW / marks.rw;   // px de fotograma por px de miniatura
+    const sc = Math.max(live.width / marks.frameW, live.height / marks.frameH);
+    const ox = (live.width - marks.frameW * sc) / 2, oy = (live.height - marks.frameH * sc) / 2;
+    x.font = `bold ${Math.round(15 * dpr)}px -apple-system, sans-serif`; x.textAlign = 'center'; x.textBaseline = 'middle';
+    for (const m of marks.items) {
+      const px = ox + (m.cx - dx * k) * sc, py = oy + (m.cy - dy * k) * sc, rad = Math.max(10 * dpr, m.r * sc);
+      x.lineWidth = 3 * dpr;
+      x.strokeStyle = m.lost ? 'rgba(255,255,255,.6)' : m.fixed ? '#2ee66b' : '#ff9f1c';
+      x.fillStyle = m.fixed ? 'rgba(46,230,107,.28)' : 'rgba(255,159,28,.18)';
+      x.beginPath(); x.arc(px, py, rad, 0, 7); x.fill(); x.stroke();
+      if (m.lbl) { x.fillStyle = '#fff'; x.beginPath(); x.arc(px, py - rad - 9 * dpr, 11 * dpr, 0, 7); x.fill(); x.fillStyle = m.col; x.fillText(m.lbl, px, py - rad - 9 * dpr); }
     }
-    still.classList.remove('hidden'); video.classList.add('hidden');
+  }
+  requestAnimationFrame(paintMarks);
+  function clearLive() { marks = null; const x = live.getContext('2d'); x.clearRect(0, 0, live.width, live.height); }
+
+  function rackOrder(ts) {
+    if (!ts.length) return ts;
+    const h = Math.max(...ts.map(t => t.w)) * 1.4;
+    return ts.sort((a, b) => Math.abs(a.cy - b.cy) > h * 0.6 ? a.cy - b.cy : a.cx - b.cx);
   }
   const toTile = t => { const o = t.num === 0 ? { joker: true } : { c: t.color, n: t.num }; if (t.unsure) o.unsure = true; return o; };
-
-  async function scan(mode, srcCanvas) {
-    if (!modelReady) { toast('El modelo aún se está cargando'); return; }
-    updateButtons(true); setStatus('Leyendo fichas…');
-    try {
-      const src = srcCanvas || await bestFrame();
-      const r = await Vision.analyze(src, mode);
-      push();
-      if (mode === 'rack') { state.hand = r.rack.map(toTile); zone = 'hand'; drawOverlay(src, r.rack); }
-      else { state.sets = r.sets.map(s => s.map(toTile)); state.cur = -1; state.melded = state.melded || state.sets.length > 0; zone = 'table'; drawOverlay(src, r.all); }
-      save(); render();
-      const nu = (mode === 'rack' ? r.rack : r.all).filter(t => t.unsure).length;
-      const bad = mode === 'rack' ? 0 : state.sets.filter(s => !S.validSet(s, C())).length;
-      setStatus(`${mode === 'rack' ? r.rack.length + ' fichas' : r.sets.length + ' sets · ' + r.all.length + ' fichas'} · ${r.ms} ms · toca para volver al vídeo`);
-      toast(nu || bad ? `Revisa: ${nu} dudosas${bad ? ', ' + bad + ' sets en rojo' : ''}` : 'Lectura completa', 2500);
-      logScan(mode, src, r);
-    } catch (e) { console.error(e); toast('No he podido leer la imagen', 3000); setStatus('Error'); }
-    updateButtons(false);
+  function syncState() {
+    state.hand = rackOrder(worlds.rack.result()).map(toTile);
+    const sets = Vision.groupSets(worlds.table.result()).filter(g => !(g.length === 1 && g[0].unsure));
+    state.sets = sets.map(g => g.map(toTile)); state.cur = -1;
+    save(); render();
   }
-  $('scanRack').onclick = () => scan('rack');
-  $('scanTable').onclick = () => scan('table');
-  $('camWrap').onclick = () => { if (!still.classList.contains('hidden') && stream) { still.classList.add('hidden'); video.classList.remove('hidden'); setStatus('Listo'); } };
+  function updateStats() {
+    const a = worlds.rack.counts(), m = worlds.table.counts();
+    $('statRack').innerHTML = `<b>Atril</b> ${a.fixed} ✓${a.pending ? ` · <span style="color:#ffb347">${a.pending} ?</span>` : ''}`;
+    $('statTable').innerHTML = `<b>Mesa</b> ${m.fixed} ✓${m.pending ? ` · <span style="color:#ffb347">${m.pending} ?</span>` : ''}`;
+    document.querySelectorAll('#focusSeg button').forEach(b => b.classList.toggle('on', b.dataset.f === focus));
+  }
+  function hint(res, dets) {
+    const W = worlds[focus], c = W.counts();
+    if (!dets.length) return focus === 'rack' ? 'Apunta a tu atril' : 'Apunta a la mesa';
+    if (!res.ok) return W.lost >= 2 ? 'No reconozco la zona: vuelve a enfocar fichas verdes y muévete más despacio' : 'Mantén el móvil quieto…';
+    if (c.pending) return `Acércate a las ${c.pending} fichas naranjas hasta que se pongan verdes`;
+    return focus === 'rack' ? '¡Atril completo! Cambia a Mesa' : 'Mesa leída. Recorre las zonas que falten o pulsa Terminar';
+  }
+
+  async function loop() {
+    let lastSharp = 0;
+    while (scanning) {
+      if (!video.videoWidth) { await new Promise(r => setTimeout(r, 100)); continue; }
+      const f = grabFrame(), sh = sharpness(f);
+      if (lastSharp && sh < lastSharp * 0.45) { lastSharp = lastSharp * 0.9 + sh * 0.1; setStatus('Imagen movida, quieto un momento…'); await new Promise(r => setTimeout(r, 60)); continue; }
+      lastSharp = lastSharp ? lastSharp * 0.8 + sh * 0.2 : sh;
+      const fo = focus;
+      try {
+        const r = await Vision.analyze(f, fo);
+        if (!scanning) break;
+        if (fo !== focus) continue;
+        const dets = fo === 'rack' ? r.rack : r.all;
+        const res = worlds[fo].addFrame(dets);
+        lastFrames[fo] = { frame: f, dets };
+        drawLive(f, dets, res); updateStats(); syncState();
+        setStatus(hint(res, dets));
+      } catch (e) { console.error(e); setStatus('Error leyendo, sigo…'); }
+      await new Promise(r => setTimeout(r, 0));
+    }
+  }
+
+  async function startScan() {
+    if (!modelReady) { toast('El modelo aún se está cargando'); return; }
+    try { await startCam(); } catch (e) {
+      toast(e && e.name === 'NotAllowedError' ? 'Permiso de cámara denegado. Actívalo en Ajustes › Safari › Cámara.' : 'No puedo abrir la cámara.', 4000); return;
+    }
+    worlds.rack.reset(); worlds.table.reset(); lastFrames.rack = lastFrames.table = null;
+    $('result').classList.add('hidden');
+    push(); scanning = true;
+    $('scanBtn').textContent = '■ Terminar y calcular'; $('scanBtn').classList.add('stop');
+    $('camWrap').classList.add('on'); updateStats(); setStatus(hint({ ok: true }, [1]));
+    loop();
+  }
+  async function stopScan() {
+    scanning = false; stopCam(); clearLive();
+    $('scanBtn').textContent = '▶ Empezar a escanear'; $('scanBtn').classList.remove('stop'); $('camWrap').classList.remove('on');
+    syncState();
+    for (const k of ['rack', 'table']) if (lastFrames[k]) logScan(k, lastFrames[k].frame, { all: lastFrames[k].dets });
+    setStatus('Escaneo terminado');
+    if (!state.hand.length) { toast('No he leído tu atril: escanéalo o añádelo a mano', 3500); return; }
+    $('solveBtn').click();
+  }
+  $('scanBtn').onclick = () => scanning ? stopScan() : startScan();
+  document.querySelectorAll('#focusSeg button').forEach(b => b.onclick = () => { focus = b.dataset.f; zone = focus === 'rack' ? 'hand' : 'table'; clearLive(); updateStats(); render(); });
+  $('redoFocus').onclick = () => { worlds[focus].reset(); syncState(); updateStats(); clearLive(); toast(focus === 'rack' ? 'Atril borrado: vuelve a escanearlo' : 'Mesa borrada: vuelve a escanearla'); };
   $('photoIn').onchange = async e => {
-    const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+    const f = e.target.files[0]; e.target.value = ''; if (!f || !modelReady) return;
     const bmp = await createImageBitmap(f); const c = document.createElement('canvas');
-    const sc = Math.min(1, 2400 / Math.max(bmp.width, bmp.height));
-    c.width = Math.round(bmp.width * sc); c.height = Math.round(bmp.height * sc); c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
-    scan($('photoWhat').value, c);
+    const k = Math.min(1, 2400 / Math.max(bmp.width, bmp.height));
+    c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k); c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+    const r = await Vision.analyze(c, focus); worlds[focus].reset(); worlds[focus].addFrame(focus === 'rack' ? r.rack : r.all);
+    // una sola foto: lo leído con buena confianza cuenta como fijado
+    for (const t of worlds[focus].tiles) for (const [kk, v] of t.votes) t.votes.set(kk, v * 2);
+    updateStats(); syncState(); logScan(focus, c, r); toast('Foto leída: revisa las fichas naranjas');
   };
 
   // ---------- registro de datos para reentrenar (solo en este móvil) ----------
@@ -450,7 +519,10 @@
     const box = $('result'); box.innerHTML=''; box.classList.remove('hidden');
     const add = (html, cls) => { const e=document.createElement(cls&&cls.tag||'p'); if(cls&&cls.c) e.className=cls.c; e.innerHTML=html; box.appendChild(e); return e; };
     if (bad) add(`⚠️ Hay ${bad} set${bad>1?'s':''} de la mesa que no son válidos. Revísalos (en rojo) para que la jugada sea fiable.`, {c:'note warn'});
-    if (!res.possible) {
+    if (res.over) {
+      add('Revisa la lectura', {tag:'h2'});
+      add('Estas fichas aparecen más veces de las que existen en el juego: ' + res.over.map(o => `${o.n} ${ed().names[o.c].toLowerCase()} (×${o.count})`).join(', ') + '. Corrige las repetidas y vuelve a calcular.', {c:'note warn'});
+    } else if (!res.possible) {
       add('Roba una ficha', {tag:'h2'});
       add(res.meldMode ? 'Aún no puedes sumar 30 puntos con combinaciones de tu atril.' : (res.tableInvalid && bad ? 'La mesa leída no cuadra: corrige los sets en rojo.' : 'Ninguna reorganización de la mesa te permite colocar fichas.'), {c:'note'});
     } else {

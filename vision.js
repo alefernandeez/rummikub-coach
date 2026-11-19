@@ -60,7 +60,11 @@
       const w = Math.exp(o[3 * P + y * ow + x]) * 4;
       dets.push({ cx: (sx / sw) * 4 / sc, cy: (sy / sw) * 4 / sc, ux, uy, w: w / sc, score: v });
     }
-    return dets;
+    // supresión de duplicados: dos centros dentro de la misma ficha
+    dets.sort((a, b) => b.score - a.score);
+    const keep = [];
+    for (const d of dets) if (!keep.some(k => Math.hypot(k.cx - d.cx, k.cy - d.cy) < 0.5 * Math.max(k.w, d.w))) keep.push(d);
+    return keep;
   }
 
   function cropInto(ctx, src, d, k) {

@@ -1,6 +1,6 @@
 // Caché offline: la app, el motor ONNX y los modelos quedan en el móvil tras la primera visita.
-const V = 'rummi-v3-4';
-const FILES = ['./', 'index.html', 'solver.js', 'vision.js', 'manifest.webmanifest', 'icon.png',
+const V = 'rummi-v4-1';
+const FILES = ['./', 'index.html', 'solver.js', 'vision.js', 'live.js', 'manifest.webmanifest', 'icon.png',
   'vendor/ort.wasm.min.js', 'vendor/ort-wasm-simd-threaded.wasm', 'vendor/ort-wasm-simd-threaded.mjs',
   'models/det.onnx', 'models/cls.onnx'];
 self.addEventListener('install', e => e.waitUntil(caches.open(V).then(c => c.addAll(FILES)).then(() => self.skipWaiting())));

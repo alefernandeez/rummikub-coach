@@ -177,10 +177,12 @@
     cfg = cfg || { colors: 4, copies: 2 };
     const C = cfg.colors;
     // copias efectivas = máximo observado (por si el juego trae más de las configuradas)
-    let K = cfg.copies;
-    const all = hand.concat(table || []);
+    const K = cfg.copies;
     const H = toCounts(hand, C), T = toCounts(table || [], C);
-    for (let c = 0; c < C; c++) for (let n = 1; n <= MAXN; n++) K = Math.max(K, H.cnt[c][n] + T.cnt[c][n]);
+    // lectura imposible: más copias de una ficha de las que existen -> no se calcula (el cálculo se dispararía)
+    const over = [];
+    for (let c = 0; c < C; c++) for (let n = 1; n <= MAXN; n++) if (H.cnt[c][n] + T.cnt[c][n] > K) over.push({ c, n, count: H.cnt[c][n] + T.cnt[c][n] });
+    if (over.length) return { possible: false, played: 0, sets: [], meldMode: !hasMelded, over };
     const conf = { colors: C, copies: K };
     const empty = Array.from({ length: C }, () => Array(MAXN + 1).fill(0));
     const meldMode = !hasMelded;
@@ -303,6 +305,7 @@
   function recommend({ hand, tableSets, hasMelded, cfg }) {
     const table = tableSets.flat();
     const full = solve({ hand, table, hasMelded, cfg });
+    if (full.over) return { ...full, mode: 'over' };
     if (hasMelded && !full.possible && full.tableInvalid) {
       // mesa mal leída: jugada provisional sin tocar los sets inválidos
       const C = cfg.colors, ok = tableSets.filter(s => validSet(s, C)), bad = tableSets.filter(s => !validSet(s, C));
