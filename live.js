@@ -42,6 +42,11 @@
       const k = keyOf(d), s = d.num === 0 ? d.pn : d.pn * d.pc;
       t.votes.set(k, (t.votes.get(k) || 0) + s);
       t.seen++;
+      // media de probabilidades (para la corrección por reglas al final)
+      if (d.pnum) {
+        if (!t.sn) { t.sn = d.pnum.map(() => 0); t.sc = d.pcol.map(() => 0); t.np = 0; }
+        d.pnum.forEach((p, i) => t.sn[i] += p); d.pcol.forEach((p, i) => t.sc[i] += p); t.np++;
+      }
     }
 
     newTile(d, x, y, ux, uy, w) {
@@ -148,7 +153,8 @@
         .filter(o => o.s.key && o.s.total >= 0.6 && (o.t.seen >= 2 || o.s.score >= 0.9))
         .map(({ t, s }) => {
           const [n, c] = s.key === 'J' ? [0, 0] : s.key.split('-').map(Number);
-          return { cx: t.x, cy: t.y, ux: t.ux, uy: t.uy, w: t.w, num: n, color: c, pn: s.score / (s.total + 1e-9), unsure: !s.fixed };
+          return { cx: t.x, cy: t.y, ux: t.ux, uy: t.uy, w: t.w, num: n, color: c, pn: s.score / (s.total + 1e-9), unsure: !s.fixed,
+            pnum: t.sn ? t.sn.map(p => p / t.np) : null, pcol: t.sc ? t.sc.map(p => p / t.np) : null };
         });
     }
 

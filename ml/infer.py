@@ -61,10 +61,63 @@ class Pipeline:
             k = int(n[i].argmax())
             if k == 14: continue
             if len(dets) >= 4 and (lab[i, 0] - med[0] < -16 or np.hypot(*(lab[i, 1:] - med[1:])) > 15): continue
-            d.update(num=k, color=int(c[i].argmax()), pn=float(n[i].max()), pc=float(c[i].max()))
+            d.update(num=k, color=int(c[i].argmax()), pn=float(n[i].max()), pc=float(c[i].max()), pnum=n[i].tolist(), pcol=c[i].tolist())
             d['unsure'] = bool(d['pn'] < 0.7 or (k != 0 and d['pc'] < 0.7))
             out.append(d)
         return out
+
+def correct_set(g, C=6, max_j=4, margin=10):
+    """Corrección por reglas (Vandevelde et al., 2024): lectura válida más probable del set."""
+    k = len(g)
+    if k < 3: return None
+    eps = 1e-4
+    LN = [np.log(np.array(t['pnum'][:14]) / max(sum(t['pnum'][:14]), eps) + eps) for t in g]   # 0=comodín, 1..13
+    LC = [np.log(np.array(t['pcol'][:C]) + eps) for t in g]
+    indep = sum(max(LN[i][1:].max() + LC[i].max(), LN[i][0]) for i in range(k))
+    best = (-1e9, None)
+    # grupos: mismo número, colores distintos (DP sobre colores usados y comodines)
+    if k <= C:
+        for n in range(1, 14):
+            dp = {(0, 0): (0.0, [])}
+            for i in range(k):
+                nd = {}
+                for (mask, j), (s, asg) in dp.items():
+                    if j < max_j:
+                        key = (mask, j + 1); v = s + LN[i][0]
+                        if key not in nd or nd[key][0] < v: nd[key] = (v, asg + [(0, 0)])
+                    for c in range(C):
+                        if mask >> c & 1: continue
+                        key = (mask | 1 << c, j); v = s + LN[i][n] + LC[i][c]
+                        if key not in nd or nd[key][0] < v: nd[key] = (v, asg + [(n, c)])
+                dp = nd
+            for (mask, j), (s, asg) in dp.items():
+                if mask and s > best[0]: best = (s, asg)
+    # escaleras: un color, consecutivos en el orden del set (o al revés)
+    for c in range(C):
+        for rev in (False, True):
+            for s0 in range(1, 15 - k):
+                vals = [s0 + (k - 1 - i if rev else i) for i in range(k)]
+                real = [LN[i][vals[i]] + LC[i][c] for i in range(k)]
+                delta = sorted(((LN[i][0] - real[i], i) for i in range(k)), reverse=True)
+                jokers = {i for dlt, i in delta[:max_j] if dlt > 0}
+                if len(jokers) == k: jokers.discard(delta[-1][1])
+                tot = sum(LN[i][0] if i in jokers else real[i] for i in range(k))
+                if tot > best[0]: best = (tot, [(0, 0) if i in jokers else (vals[i], c) for i in range(k)])
+    if best[1] is None or best[0] < indep - margin: return None
+    return best[1]
+
+def apply_corrections(sets, C=6):
+    changed = 0
+    for g in sets:
+        asg = correct_set(g, C)
+        if asg is None:
+            for t in g: t['invalid'] = len(g) >= 3
+            continue
+        for t, (n, c) in zip(g, asg):
+            if t['num'] != n or (n != 0 and t['color'] != c):
+                changed += 1; t['corrected'] = True; t['unsure'] = True
+            t['num'], t['color'] = n, c
+    return changed
 
 def group_sets(tiles):
     n = len(tiles); parent = list(range(n))

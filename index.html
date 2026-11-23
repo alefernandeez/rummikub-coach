@@ -346,6 +346,7 @@
   function syncState() {
     state.hand = rackOrder(worlds.rack.result()).map(toTile);
     const sets = Vision.groupSets(worlds.table.result()).filter(g => !(g.length === 1 && g[0].unsure));
+    Vision.applyCorrections(sets, C(), state.cfg.jokers);
     state.sets = sets.map(g => g.map(toTile)); state.cur = -1;
     save(); render();
   }

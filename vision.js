@@ -125,7 +125,7 @@
         if (L - mL < -16 || Math.hypot(A - mA, B - mB) > 15) return;   // no es una ficha (piel, ropa, objetos)
       }
       const c = argmax(res[i].col), pn = res[i].num[k], pc = res[i].col[c];
-      out.push({ ...d, num: k, color: c, pn, pc, unsure: pn < 0.7 || (k !== 0 && pc < 0.7) });
+      out.push({ ...d, num: k, color: c, pn, pc, pnum: res[i].num, pcol: res[i].col, unsure: pn < 0.7 || (k !== 0 && pc < 0.7) });
     });
     return out;
   }
@@ -153,6 +153,57 @@
     return r.sort((a, b) => Math.abs(a.cy - b.cy) > h * 0.6 ? a.cy - b.cy : a.cx - b.cx);
   }
 
+  // Corrección por reglas (Vandevelde et al., 2024): para cada set se busca la lectura VÁLIDA
+  // (escalera o grupo, con comodines) más probable según el modelo. Si no es mucho menos probable
+  // que la lectura ficha a ficha (margen en log-probabilidad), se aplica y las fichas cambiadas
+  // quedan marcadas como dudosas para que el usuario las confirme.
+  function correctSet(g, C, maxJ, margin) {
+    const k = g.length; if (k < 3 || !g[0].pnum) return null;
+    const eps = 1e-4;
+    const LN = g.map(t => { const s = t.pnum.slice(0, 14).reduce((a, b) => a + b, 0) || eps; return t.pnum.slice(0, 14).map(p => Math.log(p / s + eps)); });
+    const LC = g.map(t => t.pcol.slice(0, C).map(p => Math.log(p + eps)));
+    let indep = 0;
+    for (let i = 0; i < k; i++) indep += Math.max(Math.max(...LN[i].slice(1)) + Math.max(...LC[i]), LN[i][0]);
+    let best = -1e9, bestA = null;
+    if (k <= C) for (let n = 1; n <= 13; n++) {
+      let dp = new Map([['0,0', { s: 0, a: [] }]]);
+      for (let i = 0; i < k; i++) {
+        const nd = new Map();
+        for (const [key, { s, a }] of dp) {
+          const [mask, j] = key.split(',').map(Number);
+          const put = (kk, val, as) => { const e = nd.get(kk); if (!e || e.s < val) nd.set(kk, { s: val, a: as }); };
+          if (j < maxJ) put(mask + ',' + (j + 1), s + LN[i][0], a.concat([[0, 0]]));
+          for (let c = 0; c < C; c++) if (!(mask >> c & 1)) put((mask | 1 << c) + ',' + j, s + LN[i][n] + LC[i][c], a.concat([[n, c]]));
+        }
+        dp = nd;
+      }
+      for (const [key, { s, a }] of dp) if (+key.split(',')[0] && s > best) { best = s; bestA = a; }
+    }
+    for (let c = 0; c < C; c++) for (const rev of [false, true]) for (let s0 = 1; s0 <= 14 - k; s0++) {
+      const vals = g.map((_, i) => s0 + (rev ? k - 1 - i : i));
+      const real = vals.map((v, i) => LN[i][v] + LC[i][c]);
+      const delta = real.map((r, i) => [LN[i][0] - r, i]).sort((a, b) => b[0] - a[0]);
+      const jk = new Set(delta.slice(0, maxJ).filter(d => d[0] > 0).map(d => d[1]));
+      if (jk.size === k) jk.delete(delta[k - 1][1]);
+      let tot = 0; for (let i = 0; i < k; i++) tot += jk.has(i) ? LN[i][0] : real[i];
+      if (tot > best) { best = tot; bestA = vals.map((v, i) => jk.has(i) ? [0, 0] : [v, c]); }
+    }
+    if (!bestA || best < indep - margin) return null;
+    return bestA;
+  }
+  function applyCorrections(sets, C, maxJ, margin = 10) {
+    let changed = 0;
+    for (const g of sets) {
+      const a = correctSet(g, C, maxJ, margin); if (!a) continue;
+      g.forEach((t, i) => {
+        const [n, c] = a[i];
+        if (t.num !== n || (n !== 0 && t.color !== c)) { changed++; t.corrected = true; t.unsure = true; }
+        t.num = n; t.color = c;
+      });
+    }
+    return changed;
+  }
+
   async function analyze(src, mode) {
     await ready;
     const t0 = performance.now();
@@ -164,5 +215,5 @@
     return { sets, all: sets.flat(), ms };
   }
 
-  root.Vision = { init, analyze, detect, classify, groupSets };
+  root.Vision = { init, analyze, detect, classify, groupSets, correctSet, applyCorrections };
 })(this);

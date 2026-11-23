@@ -17,6 +17,7 @@ Web app para iPhone que **lee las fichas con la cámara** (modelo propio que fun
 | `solver.js` | Programación dinámica exacta (número × color) que maximiza las fichas colocadas reorganizando la mesa. Tiene en cuenta comodines, la primera bajada de 30 puntos solo con fichas propias y grupos de hasta 6 colores. Verificada contra un ILP (HiGHS) en más de 1.000 partidas aleatorias sin ninguna diferencia. |
 | `live.js` | Escaneo continuo: alinea cada fotograma con el mapa de fichas ya conocidas (RANSAC de similitud), acumula votos por ficha y la fija cuando varias lecturas coinciden. Las fichas demasiado pequeñas en la imagen no votan: se quedan en naranja hasta que te acercas. |
 | `vision.js` | 1) **Detector** tipo CenterNet (mini U-Net, ~0,9 M de parámetros): predice el centro de cada ficha, su dirección "arriba" (la marca redonda va debajo del número) y su tamaño. 2) **Clasificador** (~0,4 M) sobre la ficha enderezada: número (1–13, comodín o "no es ficha"), color (6) y si está girada 180°. 3) Agrupa las fichas vecinas en sets. |
+| Corrección por reglas | Como en Vandevelde et al. (ESANN 2025): para cada set se elige la lectura válida (escalera o grupo, con comodines) más probable según el modelo; las fichas corregidas se marcan para revisar. Ver `ml/kuleuven/`. |
 | `models/*.onnx` | Modelos ejecutados con onnxruntime-web (WASM), incluido en `vendor/`. |
 | `sw.js` | Caché offline (service worker). |
 | `ml/` | Generador de escenas sintéticas, entrenamiento (PyTorch) y exportación a ONNX. |
